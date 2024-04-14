@@ -186,15 +186,29 @@ router.get(['/e', '/e/*'], async (req, res, next) => {
     }
 
     // -> From Template
-    if (req.query.from && tmplCreateRegex.test(req.query.from)) {
+    if (req.query.from && tmplCreateRegex.test(req.query.from)
+      || req.query.from_path
+      ) {
       let tmplPageId = 0
       let tmplVersionId = 0
-      if (req.query.from.indexOf(',')) {
-        const q = req.query.from.split(',')
-        tmplPageId = _.toSafeInteger(q[0])
-        tmplVersionId = _.toSafeInteger(q[1])
-      } else {
-        tmplPageId = _.toSafeInteger(req.query.from)
+      if (req.query.from) {
+        if (req.query.from.indexOf(',')) {
+          const q = req.query.from.split(',')
+          tmplPageId = _.toSafeInteger(q[0])
+          tmplVersionId = _.toSafeInteger(q[1])
+        } else {
+          tmplPageId = _.toSafeInteger(req.query.from)
+        }
+      }
+      else {
+        // path not page id
+        const templatePageFromPath = await WIKI.models.pages.getPageFromDb({
+          path: req.query.from_path,
+          locale: pageArgs.locale,
+          userId: req.user.id,
+          isPrivate: false
+        })
+        tmplPageId = templatePageFromPath.id
       }
 
       if (tmplVersionId > 0) {
