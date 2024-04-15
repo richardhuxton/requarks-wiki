@@ -188,60 +188,48 @@ router.get(['/e', '/e/*'], async (req, res, next) => {
     // -> From Template
     if (req.query.from && tmplCreateRegex.test(req.query.from)
       || req.query.from_path
-      ) {
-      let tmplPageId = 0
-      let tmplVersionId = 0
+    ) {
+      let tmplAccessCheck = 'read:source'   // or "read:history"
+      let tmplAccessAction = 'source'       // or "sourceVersion"
+      let templatePage = null
       if (req.query.from) {
-        if (req.query.from.indexOf(',')) {
+        if (req.query.from.indexOf(',') >= 0) {
           const q = req.query.from.split(',')
-          tmplPageId = _.toSafeInteger(q[0])
-          tmplVersionId = _.toSafeInteger(q[1])
+          const tmplPageId = _.toSafeInteger(q[0])
+          const tmplVersionId = _.toSafeInteger(q[1])
+          templatePage = await WIKI.models.pageHistory.getVersion({ pageId: tmplPageId, versionId: tmplVersionId })
+          tmplAccessCheck = 'read:history'
+          tmplAccessAction = 'sourceVersion'
         } else {
-          tmplPageId = _.toSafeInteger(req.query.from)
+          const tmplPageId = _.toSafeInteger(req.query.from)
+          templatePage = await WIKI.models.pages.query().findById(tmplPageId)
         }
       }
       else {
         // path not page id
-        const templatePageFromPath = await WIKI.models.pages.getPageFromDb({
+        templatePage = await WIKI.models.pages.getPageFromDb({
           path: req.query.from_path,
-          locale: pageArgs.locale,
+          locale: pageArgs.locale,  // assume the current locale is what the user wants
           userId: req.user.id,
           isPrivate: false
         })
-        tmplPageId = templatePageFromPath.id
       }
 
-      if (tmplVersionId > 0) {
-        // -> From Page Version
-        const pageVersion = await WIKI.models.pageHistory.getVersion({ pageId: tmplPageId, versionId: tmplVersionId })
-        if (!pageVersion) {
-          _.set(res.locals, 'pageMeta.title', 'Page Not Found')
-          return res.status(404).render('notfound', { action: 'template' })
-        }
-        if (!WIKI.auth.checkAccess(req.user, ['read:history'], { path: pageVersion.path, locale: pageVersion.locale })) {
-          _.set(res.locals, 'pageMeta.title', 'Unauthorized')
-          return res.render('unauthorized', { action: 'sourceVersion' })
-        }
-        page.content = Buffer.from(pageVersion.content).toString('base64')
-        page.editorKey = pageVersion.editor
-        page.title = pageVersion.title
-        page.description = pageVersion.description
-      } else {
-        // -> From Page Live
-        const pageOriginal = await WIKI.models.pages.query().findById(tmplPageId)
-        if (!pageOriginal) {
-          _.set(res.locals, 'pageMeta.title', 'Page Not Found')
-          return res.status(404).render('notfound', { action: 'template' })
-        }
-        if (!WIKI.auth.checkAccess(req.user, ['read:source'], { path: pageOriginal.path, locale: pageOriginal.locale })) {
-          _.set(res.locals, 'pageMeta.title', 'Unauthorized')
-          return res.render('unauthorized', { action: 'source' })
-        }
-        page.content = Buffer.from(pageOriginal.content).toString('base64')
-        page.editorKey = pageOriginal.editorKey
-        page.title = pageOriginal.title
-        page.description = pageOriginal.description
+      // Report any errors
+      if (!templatePage) {
+        _.set(res.locals, 'pageMeta.title', 'Page Not Found')
+        return res.status(404).render('notfound', { action: 'template' })
       }
+      if (!WIKI.auth.checkAccess(req.user, [tmplAccessCheck], { path: templatePage.path, locale: templatePage.locale })) {
+        _.set(res.locals, 'pageMeta.title', 'Unauthorized')
+        return res.render('unauthorized', { action: tmplAccessAction })
+      }
+
+      // Assemble the page object ready for user to edit
+      page.content = Buffer.from(templatePage.content).toString('base64')
+      page.editorKey = templatePage.editorKey
+      page.title = templatePage.title
+      page.description = templatePage.description
     }
   }
 
